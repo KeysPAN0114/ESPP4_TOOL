@@ -1325,6 +1325,8 @@ CONFIG_EXAMPLE_MONITOR_REFRESH_BY_GPIO=y
 CONFIG_EXAMPLE_LCD_USE_EK79007=y
 # default:
 # CONFIG_EXAMPLE_LCD_USE_ILI9881C is not set
+# default:
+# CONFIG_EXAMPLE_LCD_USE_ST7701 is not set
 # end of Example Configuration
 
 #

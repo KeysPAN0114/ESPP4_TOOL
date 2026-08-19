@@ -21,7 +21,6 @@ void example_lvgl_demo_ui(lv_display_t *disp)
     lv_style_set_radius(&style_bullet, LV_RADIUS_CIRCLE);
 
     lv_obj_t *screen = lv_display_get_screen_active(disp);
-    lv_disp_set_rotation(screen, LV_DISP_ROT_90);
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x003a57), 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(0xffffff), 0);
     lv_obj_t * label = lv_label_create(screen);

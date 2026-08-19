@@ -83,7 +83,7 @@ static const char *TAG = "example";
 
 #define EXAMPLE_LVGL_DRAW_BUF_LINES    (EXAMPLE_MIPI_DSI_LCD_V_RES / 10) // number of display lines in each draw buffer
 #define EXAMPLE_LVGL_TICK_PERIOD_MS    2
-#define EXAMPLE_LVGL_TASK_STACK_SIZE   (4 * 1024)
+#define EXAMPLE_LVGL_TASK_STACK_SIZE   (16 * 1024)
 #define EXAMPLE_LVGL_TASK_PRIORITY     2
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1000 / CONFIG_FREERTOS_HZ
@@ -139,8 +139,20 @@ static const st7701_lcd_init_cmd_t lcd_cmd[] = {
     // {0x3A, (uint8_t []){0x66}, 1, 0},
     {0x11, (uint8_t []){0x00}, 1, 120},
     {0x29, (uint8_t []){0x00}, 1, 20},
+    // {0x36, (uint8_t []){0xA0 }, 1, 0}, // 00 默认方向 A0 横向旋转 C0 旋转90度 60 旋转180度
 
 };
+
+#define EXAMPLE_LCD_ROTATION   90   // 0 / 90 / 270
+
+// LVGL 逻辑分辨率：宽高互换
+#if EXAMPLE_LCD_ROTATION == 90 || EXAMPLE_LCD_ROTATION == 270
+    #define EXAMPLE_LVGL_HOR_RES  EXAMPLE_MIPI_DSI_LCD_V_RES   // 800
+    #define EXAMPLE_LVGL_VER_RES  EXAMPLE_MIPI_DSI_LCD_H_RES   // 480
+#else
+    #define EXAMPLE_LVGL_HOR_RES  EXAMPLE_MIPI_DSI_LCD_H_RES
+    #define EXAMPLE_LVGL_VER_RES  EXAMPLE_MIPI_DSI_LCD_V_RES
+#endif
 
 extern void example_lvgl_demo_ui(lv_display_t *disp);
 
@@ -152,16 +164,53 @@ void example_rounder_flush_area_cb(lv_event_t * event)
     area->x2 = ALIGN_UP(area->x2, 16) - 1;
 }
 #endif
-
+// 旋转后的临时缓冲（够放一个 draw buffer 的旋转结果）
+// 正确：必须和 draw buffer 一样大
+static uint8_t rot_buf[EXAMPLE_LVGL_HOR_RES * EXAMPLE_LVGL_DRAW_BUF_LINES * 3];
 static void example_lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     esp_lcd_panel_handle_t panel_handle = lv_display_get_user_data(disp);
-    int offsetx1 = area->x1;
-    int offsetx2 = area->x2;
-    int offsety1 = area->y1;
-    int offsety2 = area->y2;
-    // pass the draw buffer to the driver
-    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
+
+#if EXAMPLE_LCD_ROTATION == 90
+    int w = area->x2 - area->x1 + 1;
+    int h = area->y2 - area->y1 + 1;
+    // 逻辑坐标 -> 物理坐标（面板 480x800）
+    int px1 = area->y1;                                  // X = y
+    int py1 = EXAMPLE_LVGL_HOR_RES - 1 - area->x2;       // Y = Lw-1-x
+    // RGB888 逐像素旋转
+    for (int y = area->y1; y <= area->y2; y++) {
+        for (int x = area->x1; x <= area->x2; x++) {
+            uint8_t *src = px_map + ((y - area->y1) * w + (x - area->x1)) * 3;
+            uint8_t *dst = rot_buf + ((area->x2 - x) * h + (y - area->y1)) * 3;
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+        }
+    }
+    esp_lcd_panel_draw_bitmap(panel_handle, px1, py1, px1 + h, py1 + w, rot_buf);
+
+#elif EXAMPLE_LCD_ROTATION == 270
+    int w = area->x2 - area->x1 + 1;
+    int h = area->y2 - area->y1 + 1;
+    int px1 = EXAMPLE_LVGL_VER_RES - 1 - area->y2;       // X = Lh-1-y
+    int py1 = area->x1;                                   // Y = x
+    for (int y = area->y1; y <= area->y2; y++) {
+        for (int x = area->x1; x <= area->x2; x++) {
+            uint8_t *src = px_map + ((y - area->y1) * w + (x - area->x1)) * 3;
+            uint8_t *dst = rot_buf + ((y - area->y1) * w + (EXAMPLE_LVGL_VER_RES - 1 - x)) * 3;
+            dst[0] = src[0]; dst[1] = src[1]; dst[2] = src[2];
+        }
+    }
+    esp_lcd_panel_draw_bitmap(panel_handle, px1, py1, px1 + h, py1 + w, rot_buf);
+#else
+    esp_lcd_panel_draw_bitmap(panel_handle, area->x1, area->y1,
+                              area->x2 + 1, area->y2 + 1, px_map);
+#endif
+    // int offsetx1 = area->x1;
+    // int offsetx2 = area->x2;
+    // int offsety1 = area->y1;
+    // int offsety2 = area->y2;
+    // // pass the draw buffer to the driver
+    // esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
+    
 }
 
 static void example_increase_lvgl_tick(void *arg)
@@ -350,16 +399,17 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_lcd_dpi_panel_enable_dma2d(mipi_dpi_panel));
     ESP_LOGI(TAG, "DPI panel added DMA2D draw bitmap hook");
 #endif
-
+    
     ESP_ERROR_CHECK(esp_lcd_panel_reset(mipi_dpi_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(mipi_dpi_panel));
+    // esp_lcd_panel_swap_xy(mipi_dpi_panel, true);     // 交换X/Y轴
     // turn on backlight
     example_bsp_set_lcd_backlight(EXAMPLE_LCD_BK_LIGHT_ON_LEVEL);
 
     ESP_LOGI(TAG, "Initialize LVGL library");
     lv_init();
     // create a lvgl display
-    lv_display_t *display = lv_display_create(EXAMPLE_MIPI_DSI_LCD_H_RES, EXAMPLE_MIPI_DSI_LCD_V_RES);
+    lv_display_t *display = lv_display_create(EXAMPLE_LVGL_HOR_RES, EXAMPLE_LVGL_VER_RES);
     // associate the mipi panel handle to the display
     lv_display_set_user_data(display, mipi_dpi_panel);
     // set color depth
@@ -378,8 +428,11 @@ void app_main(void)
         }
     }
 #endif
-    size_t draw_buffer_sz = EXAMPLE_MIPI_DSI_LCD_H_RES * EXAMPLE_LVGL_DRAW_BUF_LINES * sizeof(lv_color_t);
-
+#if 0
+    // size_t draw_buffer_sz = EXAMPLE_MIPI_DSI_LCD_H_RES * EXAMPLE_LVGL_DRAW_BUF_LINES * sizeof(lv_color_t);
+#else
+    size_t draw_buffer_sz = EXAMPLE_LVGL_HOR_RES * EXAMPLE_LVGL_DRAW_BUF_LINES * sizeof(lv_color_t);
+#endif
     // Note:
     // Keep the display buffer in **internal** RAM can speed up the UI because LVGL uses it a lot and it should have a fast access time
     // This example allocate the buffer from PSRAM mainly because we want to save the internal RAM
