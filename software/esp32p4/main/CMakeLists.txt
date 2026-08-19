@@ -1,2 +1,2 @@
-idf_component_register(SRCS "mipi_dsi_lcd_example_main.c" "lvgl_demo_ui.c"
+idf_component_register(SRCS "bsp_lcd_touch.c" "app_main.c" "bsp_lcd.c" "lvgl_port.c" "lvgl_demo_ui.c"
                        INCLUDE_DIRS ".")
