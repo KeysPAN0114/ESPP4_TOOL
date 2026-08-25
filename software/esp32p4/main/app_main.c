@@ -13,7 +13,7 @@
 
 static const char *TAG = "app_main";
 
-extern void example_lvgl_demo_ui(lv_display_t *disp);
+#include "ui_menu.h"
 
 void app_main(void)
 {
@@ -29,9 +29,9 @@ void app_main(void)
     // Register touch input device with LVGL
     lvgl_port_add_touch(tp);
 
-    // Display the LVGL demo UI
-    ESP_LOGI(TAG, "Display LVGL Demo UI");
+    // Display the main menu UI
+    ESP_LOGI(TAG, "Display Main Menu UI");
     lvgl_port_lock();
-    example_lvgl_demo_ui(display);
+    ui_menu_create(display);
     lvgl_port_unlock();
 }
